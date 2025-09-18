@@ -1,3 +1,4 @@
+// server.js
 const express = require('express');
 const http = require('http');
 const { SerialPort } = require('serialport');
@@ -9,18 +10,22 @@ const server = http.createServer(app);
 const io = socketIo(server);
 
 const TEST_MODE = process.env.TEST_MODE === 'true';
+console.log(TEST_MODE ? "[TEST MODE] Using fake CAN data" : "[LIVE MODE] Using SerialPort");
 
-let port;
 if (!TEST_MODE) {
-  port = new SerialPort({ path: 'COM3', baudRate: 115200 });
+  const port = new SerialPort({ path: 'COM5', baudRate: 115200 }); // ← COMポートを適宜変更
   const parser = port.pipe(new ReadlineParser());
   parser.on('data', line => io.emit('can-data', line));
 } else {
-  // テストモード：CAN信号を擬似生成
   setInterval(() => {
-    const fakeLine = `ID: 0x123 Data: ${Math.floor(256*Math.random()).toString(16)} 00 00 00`;
-    io.emit('can-data', fakeLine);
-  }, 100);
+    const ids = ['0x123', '0x456', '0x789', '0xABC'];
+    ids.forEach(id => {
+      const b1 = Math.floor(Math.random() * 256);
+      const b2 = Math.floor(Math.random() * 256);
+      const fakeLine = `ID: ${id} Data: ${b1.toString(16).padStart(2, '0')} ${b2.toString(16).padStart(2, '0')}`;
+      io.emit('can-data', fakeLine);
+    });
+  }, 200);
 }
 
 app.use(express.static('public'));

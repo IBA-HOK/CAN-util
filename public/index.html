@@ -1,0 +1,134 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>CAN Viewer</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    canvas { max-width: 800px; margin-bottom: 40px; }
+    .config { margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <h1>CAN Multi-ID Monitor</h1>
+
+  <label for="id-select">表示するID（複数選択可）:</label>
+  <select id="id-select" multiple>
+    <option value="0x123">0x123</option>
+    <option value="0x456">0x456</option>
+    <option value="0x789">0x789</option>
+    <option value="0xABC">0xABC</option>
+  </select>
+
+  <div id="config-area"></div>
+  <canvas id="chart" width="800" height="400"></canvas>
+
+  <script>
+    const socket = io();
+    const ids = ['0x123', '0x456', '0x789', '0xABC'];
+    const colors = ['red', 'green', 'blue', 'orange'];
+    const configs = new Map();
+
+    const configArea = document.getElementById('config-area');
+    const ctx = document.getElementById('chart').getContext('2d');
+
+    const chartData = {
+      labels: [],
+      datasets: []
+    };
+
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: chartData,
+      options: {
+        animation: false,
+        responsive: true,
+        scales: {
+          x: { display: false },
+          y: { beginAtZero: true }
+        }
+      }
+    });
+
+    // 初期設定を構築
+    ids.forEach((id, i) => {
+      configs.set(id, {
+        data: [],
+        color: colors[i],
+        endian: 'little',
+        signed: 'unsigned'
+      });
+
+      const div = document.createElement('div');
+      div.className = 'config';
+      div.innerHTML = `
+        <strong>${id}</strong>
+        Endian:
+        <select id="endian-${id}">
+          <option value="little">Little</option>
+          <option value="big">Big</option>
+        </select>
+        Signed:
+        <select id="signed-${id}">
+          <option value="unsigned">Unsigned</option>
+          <option value="signed">Signed</option>
+        </select>
+      `;
+      configArea.appendChild(div);
+
+      document.getElementById(`endian-${id}`).addEventListener('change', e => {
+        configs.get(id).endian = e.target.value;
+      });
+      document.getElementById(`signed-${id}`).addEventListener('change', e => {
+        configs.get(id).signed = e.target.value;
+      });
+    });
+
+    // ID選択変更時にグラフを再構築
+    document.getElementById('id-select').addEventListener('change', () => {
+      const selectedIDs = Array.from(document.getElementById('id-select').selectedOptions).map(opt => opt.value);
+      chartData.datasets = selectedIDs.map(id => ({
+        label: id,
+        data: configs.get(id).data,
+        borderColor: configs.get(id).color,
+        borderWidth: 1,
+        fill: false
+      }));
+      chart.update('none');
+    });
+
+    socket.on('can-data', line => {
+      ids.forEach(id => {
+        if (!line.includes(id)) return;
+
+        const bytes = line.split('Data:')[1]?.trim().split(' ');
+        if (!bytes || bytes.length < 2) return;
+
+        const { endian, signed, data } = configs.get(id);
+
+        let rawValue;
+        if (endian === 'little') {
+          rawValue = parseInt(bytes[1], 16) << 8 | parseInt(bytes[0], 16);
+        } else {
+          rawValue = parseInt(bytes[0], 16) << 8 | parseInt(bytes[1], 16);
+        }
+
+        let value = rawValue;
+        if (signed === 'signed' && rawValue >= 0x8000) {
+          value = rawValue - 0x10000;
+        }
+
+        data.push(value);
+        if (data.length > 100) data.shift();
+
+        if (chartData.labels.length < data.length) chartData.labels.push('');
+        if (chartData.labels.length > 100) chartData.labels.shift();
+
+        chart.update('none');
+      });
+    });
+  </script>
+</body>
+</html>
